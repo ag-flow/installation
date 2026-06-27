@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ag-flow install — sources clonées pour le build (recréées par install.sh)
+/vendor/

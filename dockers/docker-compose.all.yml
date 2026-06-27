@@ -1,0 +1,208 @@
+# ============================================================================
+# ag-flow — Stack UNIFIÉE (mono-hôte, 1 seul reverse-proxy Caddy)
+#
+# Topologie :
+#   caddy (80/443)  ─┬─ {$BASE_DOMAIN}      → portal:8080
+#                    ├─ ws-*.{$BASE_DOMAIN} → routes dynamiques (portail, srv0)
+#                    ├─ doc.{$BASE_DOMAIN}  → doc:8080
+#                    └─ rag.{$BASE_DOMAIN}  → rag-frontend:80 / rag-backend:8000
+#
+#   Chaque produit a sa propre base Postgres (réseau interne, aucun port publié).
+#
+# Provenance des images :
+#   - portal  : BUILDÉ depuis les sources de devpod-ui (le dépôt ne publie PAS
+#               d'image ghcr — son CI fait push:false). Cloné par install.sh
+#               dans ../vendor/devpod-ui.
+#   - caddy   : BUILDÉ depuis devpod-ui/deploy/Dockerfile.caddy (caddy + plugin
+#               DNS Cloudflare), mais utilise le Caddyfile UNIFIÉ de ce dépôt.
+#   - doc     : PULL ghcr.io/ag-flow/doc:latest
+#   - rag-*   : PULL ghcr.io/ag-flow/rag-backend|rag-frontend (dépôt privé →
+#               `docker login ghcr.io` requis sur l'hôte).
+#
+# Pré-requis (générés par install.sh) :
+#   /data/portal.env        env du portail + du Caddy (BASE_DOMAIN, CF_API_TOKEN…)
+#   /data/doc.env           env de doc
+#   /data/rag.env           env du rag (backend + postgres)
+#   /data/pg_password.txt   mot de passe postgres de doc (secret)
+#   ../vendor/devpod-ui     clone du dépôt devpod-ui (build du portal + caddy)
+#   ../embedding_providers_pricing.yml   tarifs embeddings (déjà présent)
+#
+# Usage :
+#   ./install.sh                         # depuis la racine du dépôt
+#   # ou manuellement :
+#   docker compose -f dockers/docker-compose.all.yml up -d --build
+# ============================================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────────
+  # Reverse-proxy unifié (Caddy + plugin DNS Cloudflare)
+  # ──────────────────────────────────────────────────────────────
+  caddy:
+    build:
+      # Dockerfile.caddy de devpod-ui (context = son dossier deploy/).
+      context: ../vendor/devpod-ui/deploy
+      dockerfile: Dockerfile.caddy
+    image: agflow-caddy:latest
+    container_name: agflow-caddy
+    restart: unless-stopped
+    # BASE_DOMAIN / CF_API_TOKEN / ACME_EMAIL viennent de l'env du portail.
+    env_file: /data/portal.env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      - portal
+    networks: [agflow]
+
+  # ──────────────────────────────────────────────────────────────
+  # PORTAIL (devpod-ui) — buildé depuis les sources clonées
+  # ──────────────────────────────────────────────────────────────
+  portal:
+    build:
+      context: ../vendor/devpod-ui
+      dockerfile: deploy/Dockerfile
+    image: workspace-portal:latest
+    container_name: agflow-portal
+    restart: unless-stopped
+    env_file: /data/portal.env
+    volumes:
+      - /data:/data
+      - /data/.devpod:/root/.devpod
+    depends_on:
+      portal-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks: [agflow]
+
+  portal-postgres:
+    image: postgres:16-alpine
+    container_name: agflow-portal-postgres
+    restart: unless-stopped
+    # POSTGRES_USER / POSTGRES_PASSWORD lus depuis /data/portal.env.
+    env_file: /data/portal.env
+    environment:
+      POSTGRES_DB: portal
+    volumes:
+      - portal_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-portal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [agflow]
+
+  # ──────────────────────────────────────────────────────────────
+  # DOC (ag-flow/doc) — image ghcr publique
+  # ──────────────────────────────────────────────────────────────
+  doc:
+    image: ghcr.io/ag-flow/doc:${DOC_IMAGE_TAG:-latest}
+    container_name: agflow-doc
+    restart: unless-stopped
+    env_file: /data/doc.env
+    depends_on:
+      doc-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [agflow]
+
+  doc-postgres:
+    image: postgres:16-alpine
+    container_name: agflow-doc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: docflow
+      POSTGRES_USER: docflow
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets:
+      - pg_password
+    volumes:
+      - doc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docflow -d docflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [agflow]
+
+  # ──────────────────────────────────────────────────────────────
+  # RAG (ag-flow/rag) — images ghcr (dépôt privé → docker login requis)
+  # ──────────────────────────────────────────────────────────────
+  rag-backend:
+    image: ghcr.io/ag-flow/rag-backend:${RAG_IMAGE_TAG:-latest}
+    container_name: agflow-rag-backend
+    restart: unless-stopped
+    env_file: /data/rag.env
+    environment:
+      ENVIRONMENT: prod
+    depends_on:
+      rag-postgres:
+        condition: service_healthy
+    volumes:
+      - rag_repos:/var/lib/rag/repos
+      - ../embedding_providers_pricing.yml:/app/config/pricing.yml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [agflow]
+
+  rag-frontend:
+    image: ghcr.io/ag-flow/rag-frontend:${RAG_IMAGE_TAG:-latest}
+    container_name: agflow-rag-frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [agflow]
+
+  rag-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agflow-rag-postgres
+    restart: unless-stopped
+    # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB lus depuis /data/rag.env.
+    env_file: /data/rag.env
+    volumes:
+      - rag_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [agflow]
+
+# ============================================================================
+networks:
+  agflow:
+    driver: bridge
+    name: agflow
+
+volumes:
+  caddy_data:
+  caddy_config:
+  portal_pgdata:
+  doc_pgdata:
+  rag_pgdata:
+  rag_repos:
+
+secrets:
+  pg_password:
+    file: /data/pg_password.txt

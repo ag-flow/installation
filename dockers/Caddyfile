@@ -1,0 +1,78 @@
+# ============================================================================
+# Caddy — reverse-proxy UNIFIÉ de la stack ag-flow (mono-hôte, 1 seul Caddy)
+#
+# Route par sous-domaine vers les 3 produits :
+#   {$BASE_DOMAIN}            → portal:8080        (devpod-ui)
+#   ws-*.{$BASE_DOMAIN}       → routes injectées dynamiquement par le portail
+#                               via l'API admin (:2019), serveur "srv0"
+#   doc.{$BASE_DOMAIN}        → doc:8080           (ag-flow/doc)
+#   rag.{$BASE_DOMAIN}        → rag-frontend / rag-backend (ag-flow/rag)
+#
+# IMPORTANT — pourquoi pas de bloc catch-all `*.{$BASE_DOMAIN}` :
+#   Le portail ajoute les routes workspace (ws-*) à chaud dans le serveur srv0
+#   (cf. backend/src/portal/exposure/caddy.py — server_name="srv0",
+#    POST /config/apps/http/servers/srv0/routes). Tous les sites ci-dessous
+#   écoutent sur le même listener (:80) → Caddy les regroupe dans srv0, et les
+#   routes ws-* dynamiques (host-matchées) cohabitent sans conflit. Un bloc
+#   wildcard statique intercepterait les ws-* AVANT les routes dynamiques
+#   (perte du forward_auth) — à proscrire (cf. §F-33 fail-closed de devpod-ui).
+#
+# TLS / PRODUCTION :
+#   Ce fichier est en HTTP simple (préfixe http://) — adapté au dev et au
+#   déploiement derrière un Cloudflare Tunnel qui termine le TLS en amont.
+#   Pour du TLS direct (wildcard DNS-01 Cloudflare), retirer le préfixe
+#   `http://` de chaque site et ajouter dans chaque bloc :
+#       tls {$ACME_EMAIL} {
+#           dns cloudflare {$CF_API_TOKEN}
+#       }
+#   (l'image Caddy est buildée avec le plugin caddy-dns/cloudflare — voir
+#    deploy/Dockerfile.caddy de devpod-ui, utilisé par le service `caddy`.)
+# ============================================================================
+
+{
+    # API admin Caddy — réseau interne uniquement (port 2019 NON publié).
+    # 0.0.0.0 requis : le service `portal` (conteneur distinct, même réseau)
+    # appelle http://caddy:2019 pour pousser les routes workspace.
+    admin 0.0.0.0:2019
+}
+
+# ──────────────────────────────────────────────────────────────────────────
+# PORTAIL (devpod-ui) — domaine de base
+# Les sous-domaines ws-*.{$BASE_DOMAIN} sont ajoutés dynamiquement par le
+# portail (M6) sur ce même serveur srv0. Ne rien ajouter ici qui les capte.
+# ──────────────────────────────────────────────────────────────────────────
+http://{$BASE_DOMAIN} {
+    reverse_proxy portal:8080 {
+        flush_interval -1
+        transport http {
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+}
+
+# ──────────────────────────────────────────────────────────────────────────
+# DOC (ag-flow/doc) — doc.{$BASE_DOMAIN}
+# ──────────────────────────────────────────────────────────────────────────
+http://doc.{$BASE_DOMAIN} {
+    reverse_proxy doc:8080
+}
+
+# ──────────────────────────────────────────────────────────────────────────
+# RAG (ag-flow/rag) — rag.{$BASE_DOMAIN}
+# SPA (frontend Nginx) en racine, API FastAPI (backend) sur les routes d'API.
+#
+# ⚠️ Le découpage des chemins ci-dessous est DÉRIVÉ de install.md (le dépôt
+#    ag-flow/rag est privé et n'a pas pu être lu dans cette session). À
+#    reconcilier avec le Caddyfile réel de ag-flow/rag : ajuster @api si le
+#    backend expose d'autres préfixes.
+# ──────────────────────────────────────────────────────────────────────────
+http://rag.{$BASE_DOMAIN} {
+    @api path /api/* /health /healthz /version /auth/* /admin/* /webhooks/* /ui*
+    handle @api {
+        reverse_proxy rag-backend:8000
+    }
+    handle {
+        reverse_proxy rag-frontend:80
+    }
+}
