@@ -1,15 +1,19 @@
 # ============================================================================
-# ag-flow — Stack mutualisée (rag + doc)
+# ag-flow — Stack mutualisée (rag + doc + portal)
 #
 # Mutualisation :
 #   - postgres : UNE instance pgvector partagée.
 #       • rôle/DB "rag" (superuser → crée les DB workspace dynamiques de rag)
-#       • rôle/DB "docflow" créés par ./initdb/10-docflow.sh au 1er démarrage
+#       • rôle/DB "docflow" créés par ./initdb/10-docflow.sh
+#       • rôle/DB "portal"  créés par ./initdb/20-portal.sh
 #   - réseau "agflow" commun
-#   - reverse-proxy "caddy" commun : rag en hôte par défaut (:80),
-#     doc en sous-domaine doc.{BASE_DOMAIN}
+#   - reverse-proxy "caddy" UNIQUE (API admin :2019 pour les routes ws-* du portal)
+#       • portal → hôte de base {BASE_DOMAIN}  (+ ws-*.{BASE_DOMAIN} dynamiques)
+#       • rag    → rag.{BASE_DOMAIN}
+#       • doc    → doc.{BASE_DOMAIN}
 #
-# Images : PULL depuis ghcr.io/ag-flow (rag-backend, rag-frontend, doc).
+# Images : PULL ghcr.io (ag-flow/rag-*, ag-flow/doc, gaelgael5/workspace-portal).
+# TLS : HTTP simple derrière Cloudflare Tunnel (auto_https off).
 # ============================================================================
 services:
 
@@ -22,8 +26,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      # Lu par initdb/10-docflow.sh pour créer le rôle docflow.
+      # Lus par les scripts initdb pour créer les rôles docflow / portal.
       DOC_DB_PASSWORD: ${DOC_DB_PASSWORD}
+      PORTAL_DB_PASSWORD: ${PORTAL_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./initdb:/docker-entrypoint-initdb.d:ro
@@ -43,7 +48,6 @@ services:
     environment:
       ENVIRONMENT: prod
       GIT_SHA: ${GIT_SHA:-}
-      # Construits ici depuis les variables Postgres — ne pas mettre dans .env
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       RAG_POSTGRES_ADMIN_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/postgres
     depends_on:
@@ -110,7 +114,33 @@ services:
         max-file: "3"
     networks: [agflow]
 
-  # ── Reverse-proxy mutualisé ────────────────────────────────────────────────
+  # ── portal (devpod-ui / workspace-portal) ──────────────────────────────────
+  # Config + secrets dans /data (init par deploy.sh via portal/install.sh).
+  portal:
+    image: ghcr.io/gaelgael5/workspace-portal:${PORTAL_IMAGE_TAG:-main}
+    container_name: workspace-portal
+    restart: always
+    env_file: /data/.env
+    volumes:
+      - /data:/data
+      - /data/.devpod:/root/.devpod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks: [agflow]
+
+  # ── Reverse-proxy mutualisé (API admin :2019 pour le portal) ───────────────
   caddy:
     image: caddy:2-alpine
     container_name: agflow-caddy
@@ -129,6 +159,8 @@ services:
       frontend:
         condition: service_healthy
       doc:
+        condition: service_healthy
+      portal:
         condition: service_healthy
     logging:
       driver: json-file

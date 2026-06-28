@@ -1,27 +1,32 @@
-# Stack ag-flow mutualisée (rag + doc)
+# Stack ag-flow mutualisée (portal + rag + doc)
 
 Installation prod **reproductible** d'une stack `docker compose` **unique**
-hébergeant plusieurs produits ag-flow, avec les composants partagés **mutualisés**
+hébergeant les produits ag-flow, avec les composants partagés **mutualisés**
 (voir objectifs dans `../../CLAUDE.md`).
 
 ## Mutualisation
 
 - **1 Postgres** (`pgvector/pgvector:pg16`) partagé :
   - rôle/base `rag` (superuser — crée aussi les bases workspace dynamiques de rag) ;
-  - rôle/base `docflow` créés par `initdb/10-docflow.sh` au premier démarrage.
+  - rôle/base `docflow` (`initdb/10-docflow.sh`) ;
+  - rôle/base `portal` (`initdb/20-portal.sh`).
 - **1 réseau** Docker (`agflow`).
-- **1 reverse-proxy Caddy** : `rag` sur l'hôte par défaut (`:80`), `doc` sur
-  `doc.{BASE_DOMAIN}`.
+- **1 reverse-proxy Caddy** (API admin `:2019` pour les routes `ws-*` du portal) :
+  - `portal` → hôte de base `{BASE_DOMAIN}` (+ `ws-*.{BASE_DOMAIN}` dynamiques) ;
+  - `rag` → `rag.{BASE_DOMAIN}` ;
+  - `doc` → `doc.{BASE_DOMAIN}`.
 
 ## Produits
 
 | Produit | Image | Accès |
 |---|---|---|
-| rag | `ghcr.io/ag-flow/rag-backend` + `rag-frontend` | hôte par défaut (`/ui`, `/api/*`…) |
+| portal | `ghcr.io/gaelgael5/workspace-portal` | `{BASE_DOMAIN}` (+ `ws-*`) |
+| rag | `ghcr.io/ag-flow/rag-backend` + `rag-frontend` | `rag.{BASE_DOMAIN}` |
 | doc | `ghcr.io/ag-flow/doc` | `doc.{BASE_DOMAIN}` |
 
 Mode de livraison : **PULL** (images publiques ghcr). Aucun build, aucune
-dépendance tirée des dépôts sources à l'exécution.
+dépendance tirée des dépôts sources à l'exécution. TLS terminé en amont par
+Cloudflare Tunnel — Caddy tourne en HTTP simple (`auto_https off`).
 
 ## Installation (sur la machine cible)
 
@@ -31,28 +36,37 @@ cd installation
 deploy/docker-compose/deploy.sh
 ```
 
-Le script copie les dépendances dans `/opt/agflow`, génère `/opt/agflow/.env`
-(secrets rag + doc, non-interactif, idempotent), `docker compose pull && up -d`,
-puis vérifie la santé de **rag** et de **doc**. Les mots de passe admin générés
-sont affichés en fin d'exécution.
+Le script :
+1. copie les dépendances dans `/opt/agflow` et génère `/opt/agflow/.env`
+   (secrets rag + doc + mot de passe Postgres portal, non-interactif, idempotent) ;
+2. initialise `/data` du portal (CA, certs, `config.yaml`, `.env`) via le
+   `portal/install.sh` vendorisé, puis y complète `DATABASE_URL` + `PORTAL_VAULT_KEK` ;
+3. `docker compose pull && up -d`, applique les migrations Alembic du portal ;
+4. vérifie la santé de **portal**, **rag** et **doc**.
+
+Les mots de passe admin générés sont affichés en fin d'exécution.
 
 ### Variables optionnelles
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `DEPLOY_DIR` | `/opt/agflow` | répertoire d'installation |
-| `BASE_DOMAIN` | `agflow.local` | doc servi sur `doc.<BASE_DOMAIN>` |
+| `DEPLOY_DIR` | `/opt/agflow` | répertoire d'installation (rag/doc) |
+| `BASE_DOMAIN` | `agflow.local` | portal = base ; rag/doc en sous-domaines |
 | `RAG_PUBLIC_URL` | `http://<ip-hôte>` | URL publique rag |
-| `IMAGE_TAG` / `DOC_IMAGE_TAG` | `latest` | épingler une version |
+| `IMAGE_TAG` / `DOC_IMAGE_TAG` / `PORTAL_IMAGE_TAG` | `latest`/`latest`/`main` | versions |
 | `GHCR_TOKEN` | *(vide)* | token `read:packages` si images privées |
+
+> Le portal stocke sa config et ses secrets dans `/data` (CA, certs,
+> `config.yaml`, `.env`) — distinct de `/opt/agflow`.
 
 ## Contenu
 
 | Fichier | Rôle |
 |---|---|
-| `deploy.sh` | installe la stack |
-| `docker-compose.yml` | stack mutualisée (postgres, backend, frontend, doc, caddy) |
-| `Caddyfile` | reverse-proxy commun |
-| `initdb/10-docflow.sh` | crée le rôle/base `docflow` |
+| `deploy.sh` | installe la stack complète |
+| `docker-compose.yml` | stack mutualisée (postgres, backend, frontend, doc, portal, caddy) |
+| `Caddyfile` | reverse-proxy commun (admin API + routage par hôte) |
+| `initdb/10-docflow.sh`, `initdb/20-portal.sh` | création des rôles/bases doc & portal |
+| `portal/install.sh` | init `/data` du portal (vendorisé depuis devpod-ui) |
 | `pricing.yml` | tarifs embeddings rag (lecture seule) |
-| `.env.example` | gabarit de configuration (rag + doc) |
+| `.env.example` | gabarit de configuration (rag + doc + portal) |

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ============================================================================
-# deploy/docker-compose/deploy.sh — Installation PROD mutualisée ag-flow (rag + doc)
+# deploy/docker-compose/deploy.sh — Installation PROD mutualisée ag-flow
+#                                    (portal + rag + doc)
 #
 # Toutes les dépendances viennent de CE dépôt (ag-flow/installation) — rien
 # n'est tiré des dépôts sources à l'exécution.
 #
-# Mutualisation : 1 Postgres (rôles rag + docflow), 1 réseau, 1 Caddy.
+# Mutualisation : 1 Postgres (rôles rag + docflow + portal), 1 réseau,
+#                 1 Caddy (API admin :2019 pour les routes ws-* du portal).
 # Mode de livraison UNIQUE = PULL : images pré-buildées ghcr.io/ag-flow.
 #
 # Usage (sur la machine cible) :
@@ -91,6 +93,9 @@ else
     DOC_FERNET="$(python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")"
     DOC_ADMIN_PASS="$(openssl rand -hex 12)"
 
+    # — secret postgres du portal —
+    PORTAL_PG_PASS="$(openssl rand -hex 24)"
+
     sed -e "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" \
         -e "s|^DOC_IMAGE_TAG=.*|DOC_IMAGE_TAG=${DOC_IMAGE_TAG}|" \
         -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${PG_PASS}|" \
@@ -105,12 +110,41 @@ else
         -e "s|^JWT_SECRET=.*|JWT_SECRET=${DOC_JWT}|" \
         -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${DOC_FERNET}|" \
         -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${DOC_ADMIN_PASS}|" \
+        -e "s|^PORTAL_DB_PASSWORD=.*|PORTAL_DB_PASSWORD=${PORTAL_PG_PASS}|" \
         "${DEPLOY_DIR}/.env.example" > "$ENV_FILE"
     chmod 600 "$ENV_FILE"
     info ".env créé (chmod 600) — domaine : ${BASE_DOMAIN} — URL rag : ${PUBLIC_URL}"
     echo -e "  ${BOLD}rag admin${RESET} : user=admin  password=${RAG_ADMIN_PASS}"
     echo -e "  ${BOLD}doc admin${RESET} : email=admin@example.com  password=${DOC_ADMIN_PASS}"
 fi
+
+# ─── Initialisation /data du portal (CA, certs, config.yaml, .env) ─────────────
+section "Initialisation du portal (/data)..."
+PORTAL_DB_PASSWORD="$(grep -E '^PORTAL_DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+# Vendorisé depuis devpod-ui:scripts/install.sh — crée /data si absent (idempotent).
+env PORTAL_BASE_DOMAIN="${BASE_DOMAIN}" \
+    PORTAL_EXTERNAL_URL="https://${BASE_DOMAIN}" \
+    bash "${SCRIPT_DIR}/portal/install.sh" \
+        --data-root /data \
+        --compose-file "${DEPLOY_DIR}/docker-compose.yml"
+
+# Compléter /data/.env (clés non gérées par install.sh) — jamais réécrites.
+PORTAL_ENV="/data/.env"
+_pset() { # idempotent : ne réécrit pas une valeur déjà présente et non vide
+    local k="$1" v="$2"
+    if grep -qE "^$k=.+" "$PORTAL_ENV" 2>/dev/null; then return 0; fi
+    if grep -qE "^$k=" "$PORTAL_ENV" 2>/dev/null; then
+        sed -i "s|^$k=.*|$k=$v|" "$PORTAL_ENV"
+    else
+        echo "$k=$v" >> "$PORTAL_ENV"
+    fi
+}
+_pset DATABASE_URL "postgresql+asyncpg://portal:${PORTAL_DB_PASSWORD}@postgres/portal"
+_pset PORTAL_VAULT_KEK "$(openssl rand -hex 32)"
+_pset DEV_MODE "false"
+chmod 600 "$PORTAL_ENV"
+PORTAL_LOCAL_PASS="$(grep -E '^LOCAL_PASSWORD=' "$PORTAL_ENV" | cut -d= -f2-)"
+info "/data initialisé — portal admin : user=admin  password=${PORTAL_LOCAL_PASS:-<voir /data/.env>}"
 
 # ─── Authentification GHCR (seulement si images privées) ──────────────────────
 if [ -n "$GHCR_TOKEN" ]; then
@@ -130,7 +164,19 @@ cd "$DEPLOY_DIR"
 docker compose pull
 docker compose up -d
 
-# ─── Vérification (rag + doc) ─────────────────────────────────────────────────
+# ─── Migrations Alembic du portal (idempotent ; le portal migre aussi au boot) ─
+section "Migrations Alembic (portal)..."
+mig_ok=0
+for i in $(seq 1 20); do
+    if docker compose exec -T portal uv run alembic upgrade head >/dev/null 2>&1; then
+        mig_ok=1; break
+    fi
+    sleep 5
+done
+[ "$mig_ok" -eq 1 ] && info "Migrations portal appliquées." \
+    || warn "alembic non confirmé (le portal applique aussi les migrations au démarrage)."
+
+# ─── Vérification (rag + doc + portal) ─────────────────────────────────────────
 section "Vérification du démarrage..."
 HTTP_PORT="$(grep -E '^HTTP_PORT=' "$ENV_FILE" | cut -d= -f2)"; HTTP_PORT="${HTTP_PORT:-80}"
 DOMAIN="$(grep -E '^BASE_DOMAIN=' "$ENV_FILE" | cut -d= -f2)"; DOMAIN="${DOMAIN:-$BASE_DOMAIN}"
@@ -147,16 +193,18 @@ check() { # $1=label  $2=curl host header (vide=défaut)
 
 docker compose ps
 rc=0
-check "rag" "" || rc=1
-check "doc" "doc.${DOMAIN}" || rc=1
+check "portal" "${DOMAIN}"      || rc=1
+check "rag"    "rag.${DOMAIN}"  || rc=1
+check "doc"    "doc.${DOMAIN}"  || rc=1
 if [ "$rc" -ne 0 ]; then
     error "Au moins un service ne répond pas. Logs :"
-    docker compose logs backend doc --tail=40 || true
+    docker compose logs portal backend doc --tail=40 || true
     exit 1
 fi
 
-section "Déploiement ag-flow (rag + doc) terminé."
+section "Déploiement ag-flow (portal + rag + doc) terminé."
 echo "  Répertoire : ${DEPLOY_DIR}"
-echo "  rag        : http://localhost:${HTTP_PORT}/ui   (hôte par défaut)"
-echo "  doc        : http://doc.${DOMAIN}/             (Host: doc.${DOMAIN})"
+echo "  portal     : http://${DOMAIN}/             (hôte de base)"
+echo "  rag        : http://rag.${DOMAIN}/ui"
+echo "  doc        : http://doc.${DOMAIN}/"
 echo "  Logs       : (cd ${DEPLOY_DIR} && docker compose logs -f)"
