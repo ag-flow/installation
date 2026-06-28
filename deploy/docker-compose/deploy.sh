@@ -168,6 +168,19 @@ cd "$DEPLOY_DIR"
 docker compose pull
 docker compose up -d
 
+# Le Caddyfile est bind-monté : un changement de routes n'est pas pris en compte
+# si le conteneur caddy n'est pas recréé. On recharge explicitement la config à
+# chaque déploiement (idempotent, sans downtime via l'API admin).
+# NB : un reload réinitialise les routes ws-* injectées dynamiquement par le
+# portal ; celui-ci les ré-applique. Acceptable lors d'une (ré)installation.
+section "Rechargement de la configuration Caddy..."
+if docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null; then
+    info "Caddy rechargé (config à jour)."
+else
+    warn "Reload via API admin KO — redémarrage du conteneur caddy."
+    docker compose restart caddy
+fi
+
 # ─── Migrations Alembic du portal (idempotent ; le portal migre aussi au boot) ─
 section "Migrations Alembic (portal)..."
 mig_ok=0
@@ -195,14 +208,16 @@ check() { # $1=label  $2=curl host header (vide=défaut)
     error "$1 : health KO après 90s."; return 1
 }
 
-# Homepage : page d'accueil (vérifie un code HTTP 200, pas d'endpoint /health)
+# Homepage : pas d'endpoint /health → on vérifie que la VRAIE landing page est
+# servie (marqueur de contenu), pas un 200 vide par défaut de Caddy.
 check_home() {
     for i in $(seq 1 30); do
-        if curl -fsS -H "Host: home.${DOMAIN}" "http://localhost:${HTTP_PORT}/" >/dev/null 2>&1; then
-            info "homepage : OK"; return 0
+        body="$(curl -fsS -H "Host: home.${DOMAIN}" "http://localhost:${HTTP_PORT}/" 2>/dev/null || true)"
+        if printf '%s' "$body" | grep -qiE 'Portail des ressources|homepage'; then
+            info "homepage : OK (landing page servie)"; return 0
         fi; sleep 3
     done
-    error "homepage : KO après 90s."; return 1
+    error "homepage : KO après 90s (contenu non servi)."; return 1
 }
 
 docker compose ps
