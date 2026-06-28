@@ -22,7 +22,7 @@ et `rag-frontend` (publiques). Aucun build local, aucun téléchargement depuis
 ```bash
 git clone https://github.com/ag-flow/installation.git
 cd installation
-deploy/rag/deploy.sh
+docker-compose/rag/deploy.sh
 ```
 
 Le script : vérifie les prérequis → copie les dépendances dans `/opt/rag` →
