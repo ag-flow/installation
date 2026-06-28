@@ -147,9 +147,13 @@ services:
     restart: always
     environment:
       # Homepage refuse les requêtes dont l'hôte n'est pas listé (proxy).
-      HOMEPAGE_ALLOWED_HOSTS: home.${BASE_DOMAIN:-agflow.local}
+      # Hôtes autorisés : via Caddy (home.<domaine>) + accès direct par IP:port.
+      HOMEPAGE_ALLOWED_HOSTS: home.${BASE_DOMAIN:-agflow.local},${HOST_IP:-127.0.0.1},${HOST_IP:-127.0.0.1}:${HOMEPAGE_PORT:-3000}
       # Variable réutilisée dans les YAML : {{HOMEPAGE_VAR_BASE_DOMAIN}}
       HOMEPAGE_VAR_BASE_DOMAIN: ${BASE_DOMAIN:-agflow.local}
+    ports:
+      # Accès direct (debug/test, hors Caddy) : http://<ip-hôte>:${HOMEPAGE_PORT}
+      - "${HOMEPAGE_PORT:-3000}:3000"
     volumes:
       - ./homepage:/app/config
     logging:

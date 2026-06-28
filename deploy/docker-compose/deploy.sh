@@ -31,6 +31,9 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 DOC_IMAGE_TAG="${DOC_IMAGE_TAG:-latest}"
 GHCR_TOKEN="${GHCR_TOKEN:-}"
 GHCR_USER="${GHCR_USER:-}"
+# IP de l'hôte (pour l'accès direct par IP à Homepage). Surchargée par l'env si fournie.
+HOST_IP="${HOST_IP:-$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1 || echo 127.0.0.1)}"
+HOMEPAGE_PORT="${HOMEPAGE_PORT:-3000}"
 
 # Dépendances vendorisées dans ce dépôt (source = ce dossier).
 CONFIG_FILES=(docker-compose.yml Caddyfile pricing.yml .env.example)
@@ -76,7 +79,6 @@ ENV_FILE="${DEPLOY_DIR}/.env"
 if [ -f "$ENV_FILE" ]; then
     warn ".env existant conservé (non écrasé)."
 else
-    HOST_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1 || true)"
     PUBLIC_URL="${RAG_PUBLIC_URL:-http://${HOST_IP:-localhost}}"
 
     # — secrets rag —
@@ -121,6 +123,15 @@ else
     echo -e "  ${BOLD}rag admin${RESET} : user=admin  password=${RAG_ADMIN_PASS}"
     echo -e "  ${BOLD}doc admin${RESET} : email=admin@example.com  password=${DOC_ADMIN_PASS}"
 fi
+
+# Clés d'accès direct par IP — réécrites à chaque run (idempotent, non-secrètes).
+_set_kv() { # _set_kv KEY VALUE  (ajoute ou remplace dans $ENV_FILE)
+    if grep -qE "^$1=" "$ENV_FILE"; then sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"
+    else echo "$1=$2" >> "$ENV_FILE"; fi
+}
+_set_kv HOST_IP "$HOST_IP"
+grep -qE '^HOMEPAGE_PORT=' "$ENV_FILE" || echo "HOMEPAGE_PORT=${HOMEPAGE_PORT}" >> "$ENV_FILE"
+info "Accès direct Homepage : http://${HOST_IP}:${HOMEPAGE_PORT}"
 
 # ─── Initialisation /data du portal (CA, certs, config.yaml, .env) ─────────────
 section "Initialisation du portal (/data)..."
