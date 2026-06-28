@@ -43,7 +43,7 @@ Pour chaque bloc, et uniquement de cette façon :
 
 ## État d'avancement
 
-- [x] **Bloc 1/3 — rag** : `deploy/docker-compose/rag/` (mode PULL). Validé sur `test1`
+- [x] **Bloc 1/3 — rag** : `deploy/docker-compose/` (mode PULL). Validé sur `test1`
   (192.168.10.168) — stack `healthy`, `/health` + `/ui/` OK, install idempotente.
 - [ ] Bloc 2/3 — doc.
 - [ ] Bloc 3/3 — portal.

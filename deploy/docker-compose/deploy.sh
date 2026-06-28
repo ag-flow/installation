@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# deploy/docker-compose/rag/deploy.sh — Installation PROD du bloc rag (ag-flow.rag)
+# deploy/docker-compose/deploy.sh — Installation PROD du bloc rag (ag-flow.rag)
 #
 # Adapté de ag-flow/rag:deploy/prod/deploy.sh pour que TOUTES les dépendances
 # viennent de CE dépôt (ag-flow/installation) : les fichiers de config sont
@@ -10,7 +10,7 @@
 # (reproductible, épinglable via IMAGE_TAG). Pas de build depuis les sources.
 #
 # Usage (sur la machine cible) :
-#   deploy/docker-compose/rag/deploy.sh
+#   deploy/docker-compose/deploy.sh
 #
 # Variables d'environnement (optionnelles) :
 #   DEPLOY_DIR   Répertoire d'installation        (défaut : /opt/rag)
