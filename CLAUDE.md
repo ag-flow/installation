@@ -60,4 +60,12 @@ Pour chaque bloc, et uniquement de cette façon :
   5 conteneurs `healthy`, bases `rag_config` + `docflow` dans le même Postgres,
   doc `/health` `db:true`, install idempotente.
   rag = hôte par défaut ; doc = `doc.{BASE_DOMAIN}`.
-- [ ] Bloc 3/3 — portal (à mutualiser dans la même stack).
+- [x] **Bloc 3/3 — portal** : **mutualisé** dans la même stack (rôle/base `portal`
+  dans le Postgres partagé, Caddy unique avec API admin `:2019` pour les routes
+  `ws-*`). Validé sur `test1` — 6 conteneurs `healthy`, 3 bases (`rag_config` +
+  `docflow` + `portal`) dans 1 Postgres, portal/rag/doc `/health` OK, srv0 Caddy
+  prêt pour l'injection dynamique, install idempotente.
+  portal = hôte de base ; rag = `rag.{BASE_DOMAIN}` ; doc = `doc.{BASE_DOMAIN}`.
+
+**Stack complète livrée** : `deploy/docker-compose/deploy.sh` installe les 3
+produits mutualisés en une commande, en PULL, validé de bout en bout sur `test1`.
