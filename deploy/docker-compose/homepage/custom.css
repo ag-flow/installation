@@ -1,0 +1,100 @@
+/* ============================================================================
+ * ag-flow — thème sur-mesure de la homepage
+ * Chargé automatiquement par Homepage (/app/config/custom.css).
+ * Conforme Web Interface Guidelines : focus visible, contraste, motion réduit,
+ * transitions limitées à transform/opacity.
+ * ========================================================================== */
+
+:root {
+  color-scheme: dark;
+  --agf-accent: #2dd4bf;          /* teal */
+  --agf-accent-2: #38bdf8;        /* sky */
+  --agf-card: rgba(255, 255, 255, 0.045);
+  --agf-card-border: rgba(255, 255, 255, 0.09);
+}
+
+/* Fond dégradé sombre ag-flow */
+body,
+#page_container {
+  background:
+    radial-gradient(1100px 560px at 18% -12%, rgba(13, 148, 136, 0.22) 0%, transparent 60%),
+    radial-gradient(950px 520px at 100% -5%, rgba(56, 189, 248, 0.16) 0%, transparent 55%),
+    #0b1220 !important;
+  background-attachment: fixed;
+}
+
+/* En-tête / widgets d'information */
+#information-widgets {
+  padding-top: 0.5rem;
+}
+#information-widgets .text-theme-800,
+#information-widgets .text-theme-900 {
+  color: #e2e8f0 !important;
+}
+
+/* Titres de groupe : filet d'accent */
+h2,
+.services-group h2,
+.bookmarks-group h2 {
+  text-wrap: balance;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--agf-card-border);
+  padding-bottom: 0.35rem;
+}
+
+/* Cartes services & marque-pages : effet « glass » */
+.service-card,
+.bookmark-card {
+  background: var(--agf-card) !important;
+  border: 1px solid var(--agf-card-border);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  transition: transform 160ms ease, border-color 160ms ease,
+              background-color 160ms ease, box-shadow 160ms ease;
+}
+
+/* Survol : légère élévation + accent (contraste accru sur l'état actif) */
+.service-card:hover,
+.bookmark-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--agf-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--agf-accent) 7%, var(--agf-card)) !important;
+  box-shadow: 0 10px 30px -12px rgba(45, 212, 191, 0.35);
+}
+
+.service-card:active,
+.bookmark-card:active {
+  transform: translateY(-1px);
+}
+
+/* Accessibilité : focus clavier visible (focus-visible, pas focus) */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--agf-accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+.service-card:focus-within,
+.bookmark-card:focus-within {
+  border-color: var(--agf-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agf-accent) 70%, transparent);
+}
+
+/* Liens : feedback couleur au survol */
+a {
+  transition: color 140ms ease;
+}
+a:hover {
+  color: var(--agf-accent-2);
+}
+
+/* Respect du mouvement réduit */
+@media (prefers-reduced-motion: reduce) {
+  body,
+  #page_container { background-attachment: scroll; }
+  .service-card,
+  .bookmark-card,
+  a { transition: none !important; }
+  .service-card:hover,
+  .bookmark-card:hover { transform: none; }
+}
