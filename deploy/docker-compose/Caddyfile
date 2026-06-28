@@ -1,102 +1,89 @@
-# ag-flow — Reverse proxy mutualisé (portal + rag + doc)
+# ag-flow — Reverse proxy mutualisé (portal + rag + doc + homepage)
 # TLS géré par Cloudflare Tunnel en amont — Caddy tourne en HTTP simple (http://).
 #
-#   {BASE_DOMAIN}        → portal (workspace-portal)
-#   ws-*.{BASE_DOMAIN}   → routes injectées dynamiquement par le portal (srv0)
-#   rag.{BASE_DOMAIN}    → rag (backend/frontend)
-#   doc.{BASE_DOMAIN}    → doc (docflow)
+# Accès PROD (par nom d'hôte, port 80) :
+#   {BASE_DOMAIN}       → portal     ws-*.{BASE_DOMAIN} → routes dynamiques (srv0)
+#   home.{BASE_DOMAIN}  → homepage
+#   doc.{BASE_DOMAIN}   → doc
+#   rag.{BASE_DOMAIN}   → rag (split backend/frontend)
+#
+# Accès DIRECT par IP (debug/test, sans nom d'hôte) :
+#   :{PORTAL_PORT}=8081 → portal    :{DOC_PORT}=8082 → doc    :{RAG_PORT}=8083 → rag
+#   (homepage est publié séparément sur son propre port conteneur :3000)
 
 {
-    # API admin Caddy — réseau interne uniquement (port 2019 NON publié).
-    # 0.0.0.0 requis : le service `portal` (conteneur distinct, même réseau)
-    # appelle http://caddy:2019 pour pousser les routes workspace ws-* dans srv0.
+    # API admin Caddy (réseau interne) — le portal y injecte les routes ws-* (srv0).
     admin 0.0.0.0:2019
 }
 
-# ── portal — domaine de base ───────────────────────────────────────────────
-# Les sous-domaines ws-*.{BASE_DOMAIN} sont ajoutés dynamiquement par le portal
-# (API admin) sur ce même serveur srv0. NE PAS ajouter de catch-all *.domaine.
-http://{$BASE_DOMAIN} {
+# ── Snippets réutilisés (nom d'hôte ET accès direct par port) ───────────────
+(rag_routes) {
+    handle /api/* { reverse_proxy backend:8000 }
+    handle /auth/* { reverse_proxy backend:8000 }
+    handle /me { reverse_proxy backend:8000 }
+    handle /ws/* {
+        reverse_proxy backend:8000 {
+            transport http { keepalive 86400s }
+        }
+    }
+    handle /workspaces/* {
+        reverse_proxy backend:8000 {
+            transport http { read_timeout 120s; write_timeout 120s }
+        }
+    }
+    handle /mcp { reverse_proxy backend:8000 }
+    handle /api/webhooks/* { reverse_proxy backend:8000 }
+    handle /health { reverse_proxy backend:8000 }
+    handle /version { reverse_proxy backend:8000 }
+    handle /openapi.json { reverse_proxy backend:8000 }
+    handle /docs* { reverse_proxy backend:8000 }
+    handle /redoc* { reverse_proxy backend:8000 }
+    handle /ui* { reverse_proxy frontend:80 }
+}
+
+(portal_proxy) {
     reverse_proxy portal:8080 {
         flush_interval -1
-        transport http {
-            read_timeout 0
-            write_timeout 0
-        }
+        transport http { read_timeout 0; write_timeout 0 }
     }
 }
 
-# ── homepage (landing page) ────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# Accès par nom d'hôte (port 80) — srv0 défini en premier (routes ws-* du portal)
+# ════════════════════════════════════════════════════════════════════════════
+http://{$BASE_DOMAIN} {
+    import portal_proxy
+}
+
 http://home.{$BASE_DOMAIN} {
     reverse_proxy homepage:3000
 }
 
-# ── doc (docflow) ──────────────────────────────────────────────────────────
 http://doc.{$BASE_DOMAIN} {
     reverse_proxy doc:8080
 }
 
-# ── rag ────────────────────────────────────────────────────────────────────
 http://rag.{$BASE_DOMAIN} {
-    # API admin et workspace
-    handle /api/* {
-        reverse_proxy backend:8000
-    }
-    # Auth OIDC (login, callback, logout, refresh)
-    handle /auth/* {
-        reverse_proxy backend:8000
-    }
-    # Endpoint user OIDC
-    handle /me {
-        reverse_proxy backend:8000
-    }
-    # WebSocket — streaming logs jobs
-    handle /ws/* {
-        reverse_proxy backend:8000 {
-            transport http {
-                keepalive 86400s
-            }
-        }
-    }
-    # Indexation workspace + MCP (gros payloads — timeout étendu)
-    handle /workspaces/* {
-        reverse_proxy backend:8000 {
-            transport http {
-                read_timeout 120s
-                write_timeout 120s
-            }
-        }
-    }
-    handle /mcp {
-        reverse_proxy backend:8000
-    }
-    # Webhooks git entrants
-    handle /api/webhooks/* {
-        reverse_proxy backend:8000
-    }
-    # Santé et version
-    handle /health {
-        reverse_proxy backend:8000
-    }
-    handle /version {
-        reverse_proxy backend:8000
-    }
-    # Documentation OpenAPI
-    handle /openapi.json {
-        reverse_proxy backend:8000
-    }
-    handle /docs* {
-        reverse_proxy backend:8000
-    }
-    handle /redoc* {
-        reverse_proxy backend:8000
-    }
-    # Frontend (SPA)
-    handle /ui* {
-        reverse_proxy frontend:80
-    }
-    # Racine
+    import rag_routes
     handle {
         respond "ag-flow.rag — interface : /ui  •  API : /api/*  •  doc : /docs" 200
+    }
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# Accès direct par IP:port (debug/test) — pas de nom d'hôte requis
+# ════════════════════════════════════════════════════════════════════════════
+:{$PORTAL_PORT:8081} {
+    import portal_proxy
+}
+
+:{$DOC_PORT:8082} {
+    reverse_proxy doc:8080
+}
+
+:{$RAG_PORT:8083} {
+    import rag_routes
+    handle {
+        reverse_proxy frontend:80
     }
 }

@@ -131,7 +131,9 @@ _set_kv() { # _set_kv KEY VALUE  (ajoute ou remplace dans $ENV_FILE)
 }
 _set_kv HOST_IP "$HOST_IP"
 grep -qE '^HOMEPAGE_PORT=' "$ENV_FILE" || echo "HOMEPAGE_PORT=${HOMEPAGE_PORT}" >> "$ENV_FILE"
-info "Accès direct Homepage : http://${HOST_IP}:${HOMEPAGE_PORT}"
+grep -qE '^PORTAL_PORT=' "$ENV_FILE" || echo "PORTAL_PORT=8081" >> "$ENV_FILE"
+grep -qE '^DOC_PORT='    "$ENV_FILE" || echo "DOC_PORT=8082"    >> "$ENV_FILE"
+grep -qE '^RAG_PORT='    "$ENV_FILE" || echo "RAG_PORT=8083"    >> "$ENV_FILE"
 
 # ─── Initialisation /data du portal (CA, certs, config.yaml, .env) ─────────────
 section "Initialisation du portal (/data)..."
@@ -243,10 +245,19 @@ if [ "$rc" -ne 0 ]; then
     exit 1
 fi
 
+PORTAL_PORT_V="$(grep -E '^PORTAL_PORT=' "$ENV_FILE" | cut -d= -f2)"; PORTAL_PORT_V="${PORTAL_PORT_V:-8081}"
+DOC_PORT_V="$(grep -E '^DOC_PORT=' "$ENV_FILE" | cut -d= -f2)"; DOC_PORT_V="${DOC_PORT_V:-8082}"
+RAG_PORT_V="$(grep -E '^RAG_PORT=' "$ENV_FILE" | cut -d= -f2)"; RAG_PORT_V="${RAG_PORT_V:-8083}"
+HOMEPAGE_PORT_V="$(grep -E '^HOMEPAGE_PORT=' "$ENV_FILE" | cut -d= -f2)"; HOMEPAGE_PORT_V="${HOMEPAGE_PORT_V:-3000}"
+
 section "Déploiement ag-flow (portal + rag + doc + homepage) terminé."
 echo "  Répertoire : ${DEPLOY_DIR}"
-echo "  homepage   : http://home.${DOMAIN}/        (landing page)"
-echo "  portal     : http://${DOMAIN}/             (hôte de base)"
-echo "  rag        : http://rag.${DOMAIN}/ui"
-echo "  doc        : http://doc.${DOMAIN}/"
+echo "  — Accès par nom d'hôte (port 80, via hosts/DNS) —"
+echo "    portal   : http://${DOMAIN}/        homepage : http://home.${DOMAIN}/"
+echo "    rag      : http://rag.${DOMAIN}/ui  doc      : http://doc.${DOMAIN}/"
+echo "  — Accès direct par IP:port (debug/test) —"
+echo "    portal   : http://${HOST_IP}:${PORTAL_PORT_V}/"
+echo "    rag      : http://${HOST_IP}:${RAG_PORT_V}/ui"
+echo "    doc      : http://${HOST_IP}:${DOC_PORT_V}/"
+echo "    homepage : http://${HOST_IP}:${HOMEPAGE_PORT_V}/"
 echo "  Logs       : (cd ${DEPLOY_DIR} && docker compose logs -f)"
