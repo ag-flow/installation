@@ -2,13 +2,13 @@
 # TLS géré par Cloudflare Tunnel en amont — Caddy tourne en HTTP simple (http://).
 #
 # Accès PROD (par nom d'hôte, port 80) :
-#   {BASE_DOMAIN}       → portal     ws-*.{BASE_DOMAIN} → routes dynamiques (srv0)
-#   home.{BASE_DOMAIN}  → homepage
-#   doc.{BASE_DOMAIN}   → doc
-#   rag.{BASE_DOMAIN}   → rag (split backend/frontend)
+#   {BASE_DOMAIN}       -> portal     ws-*.{BASE_DOMAIN} -> routes dynamiques (srv0)
+#   home.{BASE_DOMAIN}  -> homepage
+#   doc.{BASE_DOMAIN}   -> doc
+#   rag.{BASE_DOMAIN}   -> rag (split backend/frontend)
 #
 # Accès DIRECT par IP (debug/test, sans nom d'hôte) :
-#   :{PORTAL_PORT}=8081 → portal    :{DOC_PORT}=8082 → doc    :{RAG_PORT}=8083 → rag
+#   :{PORTAL_PORT}=8081 -> portal   :{DOC_PORT}=8082 -> doc   :{RAG_PORT}=8083 -> rag
 #   (homepage est publié séparément sur son propre port conteneur :3000)
 
 {
@@ -18,9 +18,15 @@
 
 # ── Snippets réutilisés (nom d'hôte ET accès direct par port) ───────────────
 (rag_routes) {
-    handle /api/* { reverse_proxy backend:8000 }
-    handle /auth/* { reverse_proxy backend:8000 }
-    handle /me { reverse_proxy backend:8000 }
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+    handle /auth/* {
+        reverse_proxy backend:8000
+    }
+    handle /me {
+        reverse_proxy backend:8000
+    }
     handle /ws/* {
         reverse_proxy backend:8000 {
             transport http {
@@ -36,14 +42,30 @@
             }
         }
     }
-    handle /mcp { reverse_proxy backend:8000 }
-    handle /api/webhooks/* { reverse_proxy backend:8000 }
-    handle /health { reverse_proxy backend:8000 }
-    handle /version { reverse_proxy backend:8000 }
-    handle /openapi.json { reverse_proxy backend:8000 }
-    handle /docs* { reverse_proxy backend:8000 }
-    handle /redoc* { reverse_proxy backend:8000 }
-    handle /ui* { reverse_proxy frontend:80 }
+    handle /mcp {
+        reverse_proxy backend:8000
+    }
+    handle /api/webhooks/* {
+        reverse_proxy backend:8000
+    }
+    handle /health {
+        reverse_proxy backend:8000
+    }
+    handle /version {
+        reverse_proxy backend:8000
+    }
+    handle /openapi.json {
+        reverse_proxy backend:8000
+    }
+    handle /docs* {
+        reverse_proxy backend:8000
+    }
+    handle /redoc* {
+        reverse_proxy backend:8000
+    }
+    handle /ui* {
+        reverse_proxy frontend:80
+    }
 }
 
 (portal_proxy) {
