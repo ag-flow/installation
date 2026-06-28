@@ -54,7 +54,10 @@ Pour chaque bloc, et uniquement de cette façon :
 
 ## État d'avancement
 
-- [x] **Bloc 1/3 — rag** : `deploy/docker-compose/` (mode PULL). Validé sur `test1`
-  (192.168.10.168) — stack `healthy`, `/health` + `/ui/` OK, install idempotente.
-- [ ] Bloc 2/3 — doc.
-- [ ] Bloc 3/3 — portal.
+- [x] **Bloc 1/3 — rag** : intégré à la stack `deploy/docker-compose/` (mode PULL).
+- [x] **Bloc 2/3 — doc** : **mutualisé** avec rag dans la même stack (1 Postgres
+  pgvector partagé, 1 Caddy, 1 réseau). Validé sur `test1` (192.168.10.168) —
+  5 conteneurs `healthy`, bases `rag_config` + `docflow` dans le même Postgres,
+  doc `/health` `db:true`, install idempotente.
+  rag = hôte par défaut ; doc = `doc.{BASE_DOMAIN}`.
+- [ ] Bloc 3/3 — portal (à mutualiser dans la même stack).
