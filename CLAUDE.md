@@ -1,15 +1,26 @@
 # Mode de travail — livraison prod ag-flow
 
-Ce dépôt (`admin-install-portal`) porte l'**installation prod** des trois produits
-ag-flow. Chaque bloc a sa propre procédure de livraison prod, fonctionnelle et
-**reproductible**.
+Ce dépôt (`ag-flow/installation`) porte l'**installation prod** des produits ag-flow.
+
+## Objectifs du projet
+
+- **Cible** : UNE stack `docker compose` **unique** dans `deploy/docker-compose/`
+  qui héberge **tous** les produits ag-flow (rag, doc, portal), installable par un
+  **`deploy.sh` unique**, en **mode PULL** (images ghcr) reproductible.
+- **Mutualisation** : tout composant partageable est **mutualisé** entre produits —
+  en particulier **UNE seule base PostgreSQL** commune (une base + un rôle par
+  produit), **un réseau** Docker commun, et **un reverse-proxy** (Caddy) commun.
+- **Intégration incrémentale** : on ajoute les produits **dans la même stack**
+  (pas un compose par produit). rag d'abord, puis doc mutualisé avec rag, puis portal.
+- **Dépendances chez nous** : tout est versionné dans ce dépôt ; rien n'est tiré
+  des dépôts sources à l'exécution. Validation réelle sur `test1`, idempotente.
 
 ## Blocs (livrés individuellement)
 
 | Bloc | Produit | Dépôt source | Procédure de référence |
 |---|---|---|---|
 | 1/3 | **rag** | https://github.com/ag-flow/rag | `deploy/prod/deploy.md` + `deploy/prod/deploy.sh` |
-| 2/3 | **doc** | https://github.com/ag-flow/doc | *(à récupérer)* |
+| 2/3 | **doc** | https://github.com/ag-flow/doc | `deploy/prod-deploy.sh` |
 | 3/3 | **portal** | https://github.com/gaelgael5/devpod-ui | *(à récupérer)* |
 
 ## Mode de livraison UNIQUE — reproductible, sans raccourcis
