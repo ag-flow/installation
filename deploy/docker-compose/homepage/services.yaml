@@ -1,19 +1,19 @@
 # Homepage — ressources listées
 # Doc : https://gethomepage.dev/configs/services/
-# {{HOMEPAGE_VAR_BASE_DOMAIN}} est injecté depuis l'env (BASE_DOMAIN du compose).
+# Liens = URLs publiques (Cloudflare Tunnel → yoops.org). target _blank (settings.yaml).
 
 - ag-flow:
     - Portal:
         icon: mdi-developer-board
-        href: https://{{HOMEPAGE_VAR_BASE_DOMAIN}}
+        href: https://pod.yoops.org
         description: Workspaces DevPod (portail)
     - RAG:
         icon: mdi-database-search
-        href: https://rag.{{HOMEPAGE_VAR_BASE_DOMAIN}}/ui
+        href: https://rag.yoops.org
         description: Recherche augmentée (RAG)
     - Doc:
         icon: mdi-file-document-multiple
-        href: https://doc.{{HOMEPAGE_VAR_BASE_DOMAIN}}
+        href: https://doc.yoops.org
         description: Gestion documentaire (docflow)
 
 - Plateforme:
