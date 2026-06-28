@@ -131,6 +131,7 @@ _set_kv() { # _set_kv KEY VALUE  (ajoute ou remplace dans $ENV_FILE)
 }
 _set_kv HOST_IP "$HOST_IP"
 grep -qE '^HOMEPAGE_PORT=' "$ENV_FILE" || echo "HOMEPAGE_PORT=${HOMEPAGE_PORT}" >> "$ENV_FILE"
+grep -qE '^HOMEPAGE_PUBLIC_HOST=' "$ENV_FILE" || echo "HOMEPAGE_PUBLIC_HOST=${HOMEPAGE_PUBLIC_HOST:-cat.yoops.org}" >> "$ENV_FILE"
 grep -qE '^PORTAL_PORT=' "$ENV_FILE" || echo "PORTAL_PORT=8081" >> "$ENV_FILE"
 grep -qE '^DOC_PORT='    "$ENV_FILE" || echo "DOC_PORT=8082"    >> "$ENV_FILE"
 grep -qE '^RAG_PORT='    "$ENV_FILE" || echo "RAG_PORT=8083"    >> "$ENV_FILE"
