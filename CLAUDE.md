@@ -67,5 +67,14 @@ Pour chaque bloc, et uniquement de cette façon :
   prêt pour l'injection dynamique, install idempotente.
   portal = hôte de base ; rag = `rag.{BASE_DOMAIN}` ; doc = `doc.{BASE_DOMAIN}`.
 
-**Stack complète livrée** : `deploy/docker-compose/deploy.sh` installe les 3
-produits mutualisés en une commande, en PULL, validé de bout en bout sur `test1`.
+- [x] **Homepage** (landing page) : `ghcr.io/gethomepage/homepage` sur
+  `home.{BASE_DOMAIN}`, liens vers portal/rag/doc + `vault.yoops.org` (Harpocrate)
+  et `security.yoops.org` (Keycloak), `target: _blank`. Config versionnée
+  (`homepage/*.yaml`). Validé sur `test1`.
+
+**Stack complète livrée** : `deploy/docker-compose/deploy.sh` installe les
+produits mutualisés (portal + rag + doc + homepage) en une commande, en PULL,
+validé de bout en bout sur `test1`.
+
+Note Caddy : le `Caddyfile` est bind-monté → `deploy.sh` **recharge** Caddy à
+chaque run (API admin, fallback restart) pour appliquer les changements de routes.
