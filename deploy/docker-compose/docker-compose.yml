@@ -140,6 +140,25 @@ services:
         max-file: "5"
     networks: [agflow]
 
+  # ── homepage : landing page (liste des ressources) ─────────────────────────
+  homepage:
+    image: ghcr.io/gethomepage/homepage:${HOMEPAGE_IMAGE_TAG:-latest}
+    container_name: agflow-homepage
+    restart: always
+    environment:
+      # Homepage refuse les requêtes dont l'hôte n'est pas listé (proxy).
+      HOMEPAGE_ALLOWED_HOSTS: home.${BASE_DOMAIN:-agflow.local}
+      # Variable réutilisée dans les YAML : {{HOMEPAGE_VAR_BASE_DOMAIN}}
+      HOMEPAGE_VAR_BASE_DOMAIN: ${BASE_DOMAIN:-agflow.local}
+    volumes:
+      - ./homepage:/app/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks: [agflow]
+
   # ── Reverse-proxy mutualisé (API admin :2019 pour le portal) ───────────────
   caddy:
     image: caddy:2-alpine
@@ -162,6 +181,8 @@ services:
         condition: service_healthy
       portal:
         condition: service_healthy
+      homepage:
+        condition: service_started
     logging:
       driver: json-file
       options:

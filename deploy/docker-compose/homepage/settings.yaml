@@ -1,0 +1,20 @@
+# Homepage — réglages globaux
+# Doc : https://gethomepage.dev/configs/settings/
+title: ag-flow
+description: Portail des ressources ag-flow
+
+theme: dark
+color: slate
+headerStyle: clean
+
+# Tous les liens s'ouvrent dans un nouvel onglet.
+target: _blank
+
+# Disposition des groupes définis dans services.yaml
+layout:
+  ag-flow:
+    style: row
+    columns: 3
+  Plateforme:
+    style: row
+    columns: 2

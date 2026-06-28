@@ -61,10 +61,14 @@ for f in "${CONFIG_FILES[@]}"; do
     cp "${SCRIPT_DIR}/${f}" "${DEPLOY_DIR}/${f}"
     info "Copié : $f"
 done
-# Scripts d'init Postgres (création du rôle/base docflow)
+# Scripts d'init Postgres (création des rôles/bases docflow + portal)
 [ -d "${SCRIPT_DIR}/initdb" ] || { error "Dossier initdb/ manquant dans le repo."; exit 1; }
-cp -r "${SCRIPT_DIR}/initdb" "${DEPLOY_DIR}/initdb"
+rm -rf "${DEPLOY_DIR}/initdb"; cp -r "${SCRIPT_DIR}/initdb" "${DEPLOY_DIR}/initdb"
 info "Copié : initdb/"
+# Config Homepage (landing page)
+[ -d "${SCRIPT_DIR}/homepage" ] || { error "Dossier homepage/ manquant dans le repo."; exit 1; }
+rm -rf "${DEPLOY_DIR}/homepage"; cp -r "${SCRIPT_DIR}/homepage" "${DEPLOY_DIR}/homepage"
+info "Copié : homepage/"
 
 # ─── Génération du .env (non-interactif, idempotent) ──────────────────────────
 section "Configuration (.env)..."
@@ -191,19 +195,31 @@ check() { # $1=label  $2=curl host header (vide=défaut)
     error "$1 : health KO après 90s."; return 1
 }
 
+# Homepage : page d'accueil (vérifie un code HTTP 200, pas d'endpoint /health)
+check_home() {
+    for i in $(seq 1 30); do
+        if curl -fsS -H "Host: home.${DOMAIN}" "http://localhost:${HTTP_PORT}/" >/dev/null 2>&1; then
+            info "homepage : OK"; return 0
+        fi; sleep 3
+    done
+    error "homepage : KO après 90s."; return 1
+}
+
 docker compose ps
 rc=0
 check "portal" "${DOMAIN}"      || rc=1
 check "rag"    "rag.${DOMAIN}"  || rc=1
 check "doc"    "doc.${DOMAIN}"  || rc=1
+check_home                      || rc=1
 if [ "$rc" -ne 0 ]; then
     error "Au moins un service ne répond pas. Logs :"
-    docker compose logs portal backend doc --tail=40 || true
+    docker compose logs portal backend doc homepage --tail=40 || true
     exit 1
 fi
 
-section "Déploiement ag-flow (portal + rag + doc) terminé."
+section "Déploiement ag-flow (portal + rag + doc + homepage) terminé."
 echo "  Répertoire : ${DEPLOY_DIR}"
+echo "  homepage   : http://home.${DOMAIN}/        (landing page)"
 echo "  portal     : http://${DOMAIN}/             (hôte de base)"
 echo "  rag        : http://rag.${DOMAIN}/ui"
 echo "  doc        : http://doc.${DOMAIN}/"

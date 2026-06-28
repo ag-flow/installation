@@ -1,0 +1,15 @@
+# Homepage — widgets d'en-tête
+# Doc : https://gethomepage.dev/configs/info-widgets/
+- greeting:
+    text_size: xl
+    text: ag-flow
+
+- datetime:
+    text_size: l
+    format:
+      dateStyle: short
+      timeStyle: short
+
+- search:
+    provider: duckduckgo
+    target: _blank

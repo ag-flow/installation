@@ -26,6 +26,11 @@ http://{$BASE_DOMAIN} {
     }
 }
 
+# ── homepage (landing page) ────────────────────────────────────────────────
+http://home.{$BASE_DOMAIN} {
+    reverse_proxy homepage:3000
+}
+
 # ── doc (docflow) ──────────────────────────────────────────────────────────
 http://doc.{$BASE_DOMAIN} {
     reverse_proxy doc:8080
