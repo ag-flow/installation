@@ -23,12 +23,17 @@
     handle /me { reverse_proxy backend:8000 }
     handle /ws/* {
         reverse_proxy backend:8000 {
-            transport http { keepalive 86400s }
+            transport http {
+                keepalive 86400s
+            }
         }
     }
     handle /workspaces/* {
         reverse_proxy backend:8000 {
-            transport http { read_timeout 120s; write_timeout 120s }
+            transport http {
+                read_timeout 120s
+                write_timeout 120s
+            }
         }
     }
     handle /mcp { reverse_proxy backend:8000 }
@@ -44,7 +49,10 @@
 (portal_proxy) {
     reverse_proxy portal:8080 {
         flush_interval -1
-        transport http { read_timeout 0; write_timeout 0 }
+        transport http {
+            read_timeout 0
+            write_timeout 0
+        }
     }
 }
 
