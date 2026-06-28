@@ -1,22 +1,40 @@
+# ============================================================================
+# ag-flow — Stack mutualisée (rag + doc)
+#
+# Mutualisation :
+#   - postgres : UNE instance pgvector partagée.
+#       • rôle/DB "rag" (superuser → crée les DB workspace dynamiques de rag)
+#       • rôle/DB "docflow" créés par ./initdb/10-docflow.sh au 1er démarrage
+#   - réseau "agflow" commun
+#   - reverse-proxy "caddy" commun : rag en hôte par défaut (:80),
+#     doc en sous-domaine doc.{BASE_DOMAIN}
+#
+# Images : PULL depuis ghcr.io/ag-flow (rag-backend, rag-frontend, doc).
+# ============================================================================
 services:
 
+  # ── Base de données mutualisée ─────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: rag-postgres
+    container_name: agflow-postgres
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # Lu par initdb/10-docflow.sh pour créer le rôle docflow.
+      DOC_DB_PASSWORD: ${DOC_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks: [rag]
+    networks: [agflow]
 
+  # ── rag : backend FastAPI ──────────────────────────────────────────────────
   backend:
     image: ghcr.io/ag-flow/rag-backend:${IMAGE_TAG:-latest}
     container_name: rag-backend
@@ -45,8 +63,9 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
-    networks: [rag]
+    networks: [agflow]
 
+  # ── rag : frontend Nginx (SPA) ─────────────────────────────────────────────
   frontend:
     image: ghcr.io/ag-flow/rag-frontend:${IMAGE_TAG:-latest}
     container_name: rag-frontend
@@ -61,12 +80,43 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    networks: [rag]
+    networks: [agflow]
 
+  # ── doc (docflow) : app unique UI+API ──────────────────────────────────────
+  doc:
+    image: ghcr.io/ag-flow/doc:${DOC_IMAGE_TAG:-latest}
+    container_name: docflow
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://docflow:${DOC_DB_PASSWORD}@postgres:5432/docflow
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      LOG_LEVEL: ${DOC_LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks: [agflow]
+
+  # ── Reverse-proxy mutualisé ────────────────────────────────────────────────
   caddy:
     image: caddy:2-alpine
-    container_name: rag-caddy
+    container_name: agflow-caddy
     restart: always
+    environment:
+      BASE_DOMAIN: ${BASE_DOMAIN:-agflow.local}
     ports:
       - "${HTTP_PORT:-80}:80"
     volumes:
@@ -78,12 +128,14 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+      doc:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-    networks: [rag]
+    networks: [agflow]
 
 volumes:
   postgres_data:
@@ -92,5 +144,5 @@ volumes:
   caddy_config:
 
 networks:
-  rag:
+  agflow:
     driver: bridge

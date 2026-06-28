@@ -1,33 +1,36 @@
 #!/usr/bin/env bash
 # ============================================================================
-# deploy/docker-compose/deploy.sh — Installation PROD du bloc rag (ag-flow.rag)
+# deploy/docker-compose/deploy.sh — Installation PROD mutualisée ag-flow (rag + doc)
 #
-# Adapté de ag-flow/rag:deploy/prod/deploy.sh pour que TOUTES les dépendances
-# viennent de CE dépôt (ag-flow/installation) : les fichiers de config sont
-# vendorisés à côté de ce script — aucun téléchargement depuis ag-flow/rag.
+# Toutes les dépendances viennent de CE dépôt (ag-flow/installation) — rien
+# n'est tiré des dépôts sources à l'exécution.
 #
-# Mode de livraison UNIQUE = PULL : images pré-buildées depuis ghcr.io/ag-flow
-# (reproductible, épinglable via IMAGE_TAG). Pas de build depuis les sources.
+# Mutualisation : 1 Postgres (rôles rag + docflow), 1 réseau, 1 Caddy.
+# Mode de livraison UNIQUE = PULL : images pré-buildées ghcr.io/ag-flow.
 #
 # Usage (sur la machine cible) :
 #   deploy/docker-compose/deploy.sh
 #
 # Variables d'environnement (optionnelles) :
-#   DEPLOY_DIR   Répertoire d'installation        (défaut : /opt/rag)
-#   RAG_PUBLIC_URL  URL publique du service        (défaut : http://<ip-hôte>)
-#   IMAGE_TAG    Tag des images ghcr               (défaut : latest)
-#   GHCR_TOKEN   Token read:packages si privé      (défaut : vide = images publiques)
-#   GHCR_USER    Login GitHub associé au token     (auto-détecté si absent)
+#   DEPLOY_DIR      Répertoire d'installation     (défaut : /opt/agflow)
+#   BASE_DOMAIN     Domaine de base (doc.<dom>)   (défaut : agflow.local)
+#   RAG_PUBLIC_URL  URL publique rag              (défaut : http://<ip-hôte>)
+#   IMAGE_TAG       Tag images rag               (défaut : latest)
+#   DOC_IMAGE_TAG   Tag image doc                (défaut : latest)
+#   GHCR_TOKEN      Token read:packages si privé (défaut : vide = images publiques)
+#   GHCR_USER       Login GitHub associé au token (auto-détecté si absent)
 # ============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_DIR="${DEPLOY_DIR:-/opt/rag}"
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/agflow}"
+BASE_DOMAIN="${BASE_DOMAIN:-agflow.local}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
+DOC_IMAGE_TAG="${DOC_IMAGE_TAG:-latest}"
 GHCR_TOKEN="${GHCR_TOKEN:-}"
 GHCR_USER="${GHCR_USER:-}"
 
-# Fichiers de config vendorisés dans ce dépôt (source = ce dossier).
+# Dépendances vendorisées dans ce dépôt (source = ce dossier).
 CONFIG_FILES=(docker-compose.yml Caddyfile pricing.yml .env.example)
 
 BOLD="\033[1m"; GREEN="\033[32m"; YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
@@ -56,6 +59,10 @@ for f in "${CONFIG_FILES[@]}"; do
     cp "${SCRIPT_DIR}/${f}" "${DEPLOY_DIR}/${f}"
     info "Copié : $f"
 done
+# Scripts d'init Postgres (création du rôle/base docflow)
+[ -d "${SCRIPT_DIR}/initdb" ] || { error "Dossier initdb/ manquant dans le repo."; exit 1; }
+cp -r "${SCRIPT_DIR}/initdb" "${DEPLOY_DIR}/initdb"
+info "Copié : initdb/"
 
 # ─── Génération du .env (non-interactif, idempotent) ──────────────────────────
 section "Configuration (.env)..."
@@ -63,33 +70,46 @@ ENV_FILE="${DEPLOY_DIR}/.env"
 if [ -f "$ENV_FILE" ]; then
     warn ".env existant conservé (non écrasé)."
 else
-    # IP hôte pour une URL publique par défaut exploitable en test.
     HOST_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1 || true)"
     PUBLIC_URL="${RAG_PUBLIC_URL:-http://${HOST_IP:-localhost}}"
 
+    # — secrets rag —
     PG_PASS="$(openssl rand -hex 24)"
     MASTER_KEY="$(openssl rand -hex 32)"
     SESSION_SECRET="$(openssl rand -hex 32)"
     HARPO_DEK="$(openssl rand -hex 32)"
     WEBHOOK_SECRET="$(openssl rand -hex 32)"
-    ADMIN_PASS="$(openssl rand -hex 12)"
+    RAG_ADMIN_PASS="$(openssl rand -hex 12)"
     # Hash bcrypt avec $ doublés ($$) pour l'interpolation env_file de compose.
-    ADMIN_HASH="$(ADMIN_PASS="$ADMIN_PASS" python3 -c \
+    RAG_ADMIN_HASH="$(ADMIN_PASS="$RAG_ADMIN_PASS" python3 -c \
         "import bcrypt,os; print(bcrypt.hashpw(os.environ['ADMIN_PASS'].encode(), bcrypt.gensalt(12)).decode())" \
         | sed 's/\$/$$/g')"
 
+    # — secrets doc —
+    DOC_PG_PASS="$(openssl rand -hex 24)"
+    DOC_JWT="$(openssl rand -hex 32)"
+    DOC_FERNET="$(python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")"
+    DOC_ADMIN_PASS="$(openssl rand -hex 12)"
+
     sed -e "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" \
+        -e "s|^DOC_IMAGE_TAG=.*|DOC_IMAGE_TAG=${DOC_IMAGE_TAG}|" \
         -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${PG_PASS}|" \
         -e "s|^RAG_MASTER_KEY=.*|RAG_MASTER_KEY=${MASTER_KEY}|" \
         -e "s|^RAG_SESSION_SECRET=.*|RAG_SESSION_SECRET=${SESSION_SECRET}|" \
         -e "s|^HARPOCRATE_DEK=.*|HARPOCRATE_DEK=${HARPO_DEK}|" \
         -e "s|^RAG_WEBHOOK_SECRET=.*|RAG_WEBHOOK_SECRET=${WEBHOOK_SECRET}|" \
         -e "s|^RAG_PUBLIC_URL=.*|RAG_PUBLIC_URL=${PUBLIC_URL}|" \
-        -e "s|^RAG_BOOTSTRAP_ADMIN_PASSWORD_HASH=.*|RAG_BOOTSTRAP_ADMIN_PASSWORD_HASH=${ADMIN_HASH}|" \
+        -e "s|^RAG_BOOTSTRAP_ADMIN_PASSWORD_HASH=.*|RAG_BOOTSTRAP_ADMIN_PASSWORD_HASH=${RAG_ADMIN_HASH}|" \
+        -e "s|^BASE_DOMAIN=.*|BASE_DOMAIN=${BASE_DOMAIN}|" \
+        -e "s|^DOC_DB_PASSWORD=.*|DOC_DB_PASSWORD=${DOC_PG_PASS}|" \
+        -e "s|^JWT_SECRET=.*|JWT_SECRET=${DOC_JWT}|" \
+        -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${DOC_FERNET}|" \
+        -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${DOC_ADMIN_PASS}|" \
         "${DEPLOY_DIR}/.env.example" > "$ENV_FILE"
     chmod 600 "$ENV_FILE"
-    info ".env créé (chmod 600) — URL publique : ${PUBLIC_URL}"
-    echo -e "  ${BOLD}Admin bootstrap${RESET} : user=admin  password=${ADMIN_PASS}"
+    info ".env créé (chmod 600) — domaine : ${BASE_DOMAIN} — URL rag : ${PUBLIC_URL}"
+    echo -e "  ${BOLD}rag admin${RESET} : user=admin  password=${RAG_ADMIN_PASS}"
+    echo -e "  ${BOLD}doc admin${RESET} : email=admin@example.com  password=${DOC_ADMIN_PASS}"
 fi
 
 # ─── Authentification GHCR (seulement si images privées) ──────────────────────
@@ -110,24 +130,33 @@ cd "$DEPLOY_DIR"
 docker compose pull
 docker compose up -d
 
-# ─── Vérification ─────────────────────────────────────────────────────────────
+# ─── Vérification (rag + doc) ─────────────────────────────────────────────────
 section "Vérification du démarrage..."
 HTTP_PORT="$(grep -E '^HTTP_PORT=' "$ENV_FILE" | cut -d= -f2)"; HTTP_PORT="${HTTP_PORT:-80}"
-ok=0
-for i in $(seq 1 30); do
-    if curl -fsS "http://localhost:${HTTP_PORT}/health" >/dev/null 2>&1; then ok=1; break; fi
-    sleep 3
-done
+DOMAIN="$(grep -E '^BASE_DOMAIN=' "$ENV_FILE" | cut -d= -f2)"; DOMAIN="${DOMAIN:-$BASE_DOMAIN}"
+
+check() { # $1=label  $2=curl host header (vide=défaut)
+    local host_opt=(); [ -n "$2" ] && host_opt=(-H "Host: $2")
+    for i in $(seq 1 30); do
+        if curl -fsS "${host_opt[@]}" "http://localhost:${HTTP_PORT}/health" >/dev/null 2>&1; then
+            info "$1 : santé OK"; return 0
+        fi; sleep 3
+    done
+    error "$1 : health KO après 90s."; return 1
+}
+
 docker compose ps
-if [ "$ok" -eq 1 ]; then
-    info "Santé OK : http://localhost:${HTTP_PORT}/health"
-else
-    error "Le health check n'a pas répondu après 90s. Logs :"
-    docker compose logs backend --tail=50 || true
+rc=0
+check "rag" "" || rc=1
+check "doc" "doc.${DOMAIN}" || rc=1
+if [ "$rc" -ne 0 ]; then
+    error "Au moins un service ne répond pas. Logs :"
+    docker compose logs backend doc --tail=40 || true
     exit 1
 fi
 
-section "Déploiement rag terminé."
+section "Déploiement ag-flow (rag + doc) terminé."
 echo "  Répertoire : ${DEPLOY_DIR}"
-echo "  IHM        : http://localhost:${HTTP_PORT}/ui"
-echo "  Logs       : (cd ${DEPLOY_DIR} && docker compose logs -f backend)"
+echo "  rag        : http://localhost:${HTTP_PORT}/ui   (hôte par défaut)"
+echo "  doc        : http://doc.${DOMAIN}/             (Host: doc.${DOMAIN})"
+echo "  Logs       : (cd ${DEPLOY_DIR} && docker compose logs -f)"

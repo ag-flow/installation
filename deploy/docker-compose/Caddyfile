@@ -1,10 +1,19 @@
-# ag-flow.rag — Reverse proxy production
+# ag-flow — Reverse proxy mutualisé (rag + doc)
 # TLS géré par Cloudflare Tunnel en amont — Caddy tourne en HTTP simple.
+#
+#   doc.{BASE_DOMAIN}  → doc (docflow, UI+API sur :8080)
+#   tout le reste (:80) → rag (backend/frontend)
 
 {
     auto_https off
 }
 
+# ── doc (docflow) — sous-domaine ───────────────────────────────────────────
+doc.{$BASE_DOMAIN}:80 {
+    reverse_proxy doc:8080
+}
+
+# ── rag — hôte par défaut (catch-all) ──────────────────────────────────────
 :80 {
     # API admin et workspace
     handle /api/* {
